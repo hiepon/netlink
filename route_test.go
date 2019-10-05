@@ -655,7 +655,8 @@ func TestRouteMultiPath(t *testing.T) {
 	}
 
 	idx := link.Attrs().Index
-	route := Route{Dst: dst, MultiPath: []*NexthopInfo{{LinkIndex: idx}, {LinkIndex: idx}}}
+	via := &RtVia{Family: unix.AF_INET6, Addr: net.ParseIP("2001::1")}
+	route := Route{Dst: dst, MultiPath: []*NexthopInfo{{LinkIndex: idx}, {LinkIndex: idx, Via: via}}}
 	if err := RouteAdd(&route); err != nil {
 		t.Fatal(err)
 	}
@@ -666,8 +667,15 @@ func TestRouteMultiPath(t *testing.T) {
 	if len(routes) != 1 {
 		t.Fatal("MultiPath Route not added properly")
 	}
-	if len(routes[0].MultiPath) != 2 {
+	mpaths := routes[0].MultiPath
+	if len(mpaths) != 2 {
 		t.Fatal("MultiPath Route not added properly")
+	}
+	if mpaths[0].Via == nil && mpaths[1].Via == nil {
+		t.Fatal("MultiPath Route.Via not added properly")
+	}
+	if mpaths[0].Via != nil && mpaths[1].Via != nil {
+		t.Fatal("MultiPath Route.Via not added properly")
 	}
 }
 
@@ -786,6 +794,9 @@ func TestMPLSRouteAddDel(t *testing.T) {
 	if len(routes) != 1 {
 		t.Fatal("Route not added properly")
 	}
+	if routes[0].Via != nil {
+		t.Fatal("Route.Via not added properly")
+	}
 
 	if err := RouteDel(&route); err != nil {
 		t.Fatal(err)
@@ -798,6 +809,62 @@ func TestMPLSRouteAddDel(t *testing.T) {
 		t.Fatal("Route not removed properly")
 	}
 
+}
+
+func TestMPLSRouteAddDelVia(t *testing.T) {
+	tearDown := setUpMPLSNetlinkTest(t)
+	defer tearDown()
+
+	// get loopback interface
+	link, err := LinkByName("lo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// bring the interface up
+	if err := LinkSetUp(link); err != nil {
+		t.Fatal(err)
+	}
+
+	mplsDst := 100
+	route := Route{
+		LinkIndex: link.Attrs().Index,
+		MPLSDst:   &mplsDst,
+		NewDst: &MPLSDestination{
+			Labels: []int{200, 300},
+		},
+		Via: &RtVia{
+			Family: unix.AF_INET,
+			Addr:   net.ParseIP("10.0.0.1"),
+		},
+	}
+	if err := RouteAdd(&route); err != nil {
+		t.Fatal(err)
+	}
+	routes, err := RouteList(link, FAMILY_MPLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 {
+		t.Fatal("Route not added properly")
+	}
+	if routes[0].Via == nil {
+		t.Fatal("Route.Via not added properly")
+	}
+	if ok := routes[0].Via.Equal(route.Via); !ok {
+		t.Fatal("Route.Via not equal.")
+	}
+
+	if err := RouteDel(&route); err != nil {
+		t.Fatal(err)
+	}
+	routes, err = RouteList(link, FAMILY_MPLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 0 {
+		t.Fatal("Route not removed properly")
+	}
 }
 
 func TestRouteEqual(t *testing.T) {

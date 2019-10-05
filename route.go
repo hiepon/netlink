@@ -27,6 +27,11 @@ type Encap interface {
 	Equal(Encap) bool
 }
 
+type RtVia struct {
+	Family uint16
+	Addr   net.IP
+}
+
 // Route represents a netlink route.
 type Route struct {
 	LinkIndex  int
@@ -35,6 +40,7 @@ type Route struct {
 	Dst        *net.IPNet
 	Src        net.IP
 	Gw         net.IP
+	Via        *RtVia
 	MultiPath  []*NexthopInfo
 	Protocol   int
 	Priority   int
@@ -71,6 +77,9 @@ func (r Route) String() string {
 		elems = append(elems, fmt.Sprintf("Gw: %s", r.MultiPath))
 	} else {
 		elems = append(elems, fmt.Sprintf("Gw: %s", r.Gw))
+		if r.Via != nil {
+			elems = append(elems, fmt.Sprintf("Via: %s", r.Via))
+		}
 	}
 	elems = append(elems, fmt.Sprintf("Flags: %s", r.ListFlags()))
 	elems = append(elems, fmt.Sprintf("Table: %d", r.Table))
@@ -84,6 +93,7 @@ func (r Route) Equal(x Route) bool {
 		ipNetEqual(r.Dst, x.Dst) &&
 		r.Src.Equal(x.Src) &&
 		r.Gw.Equal(x.Gw) &&
+		r.Via.Equal(x.Via) &&
 		nexthopInfoSlice(r.MultiPath).Equal(x.MultiPath) &&
 		r.Protocol == x.Protocol &&
 		r.Priority == x.Priority &&
@@ -120,6 +130,7 @@ type NexthopInfo struct {
 	LinkIndex int
 	Hops      int
 	Gw        net.IP
+	Via       *RtVia
 	Flags     int
 	NewDst    Destination
 	Encap     Encap
@@ -136,6 +147,9 @@ func (n *NexthopInfo) String() string {
 	}
 	elems = append(elems, fmt.Sprintf("Weight: %d", n.Hops+1))
 	elems = append(elems, fmt.Sprintf("Gw: %s", n.Gw))
+	if n.Via != nil {
+		elems = append(elems, fmt.Sprintf("Via: %s", n.Via))
+	}
 	elems = append(elems, fmt.Sprintf("Flags: %s", n.ListFlags()))
 	return fmt.Sprintf("{%s}", strings.Join(elems, " "))
 }
@@ -144,6 +158,7 @@ func (n NexthopInfo) Equal(x NexthopInfo) bool {
 	return n.LinkIndex == x.LinkIndex &&
 		n.Hops == x.Hops &&
 		n.Gw.Equal(x.Gw) &&
+		n.Via.Equal(x.Via) &&
 		n.Flags == x.Flags &&
 		(n.NewDst == x.NewDst || (n.NewDst != nil && n.NewDst.Equal(x.NewDst))) &&
 		(n.Encap == x.Encap || (n.Encap != nil && n.Encap.Equal(x.Encap)))

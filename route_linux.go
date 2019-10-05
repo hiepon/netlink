@@ -443,6 +443,47 @@ func (e *SEG6LocalEncap) Equal(x Encap) bool {
 	return true
 }
 
+func (v *RtVia) Decode(buf []byte) error {
+	if len(buf) < 2 {
+		return fmt.Errorf("lack of bytes")
+	}
+	native := nl.NativeEndian()
+	v.Family = uint16(native.Uint16(buf[0:2]))
+	v.Addr = buf[2:]
+	return nil
+}
+
+func (v *RtVia) Encode() ([]byte, error) {
+	native := nl.NativeEndian()
+	buf := make([]byte, 2) // sizeof(uint16)
+	native.PutUint16(buf, v.Family)
+	if addr := v.Addr.To4(); addr != nil {
+		buf = append(buf, addr...)
+	} else if addr := v.Addr.To16(); addr != nil {
+		buf = append(buf, addr...)
+	} else {
+		buf = append(buf, v.Addr...)
+	}
+	return buf, nil
+}
+
+func (v *RtVia) Equal(o *RtVia) bool {
+	if v == nil && o == nil {
+		return true
+	}
+	if v == nil || o == nil {
+		return false
+	}
+	if v.Family != o.Family {
+		return false
+	}
+	return v.Addr.Equal(o.Addr)
+}
+
+func (v *RtVia) String() string {
+	return fmt.Sprintf("%s", v.Addr)
+}
+
 // RouteAdd will add a route to the system.
 // Equivalent to: `ip route add $route`
 func RouteAdd(route *Route) error {
@@ -564,6 +605,14 @@ func (h *Handle) routeHandle(route *Route, req *nl.NetlinkRequest, msg *nl.RtMsg
 		rtAttrs = append(rtAttrs, nl.NewRtAttr(unix.RTA_GATEWAY, gwData))
 	}
 
+	if route.Via != nil {
+		via, err := route.Via.Encode()
+		if err != nil {
+			return err
+		}
+		rtAttrs = append(rtAttrs, nl.NewRtAttr(unix.RTA_VIA, via))
+	}
+
 	if len(route.MultiPath) > 0 {
 		buf := []byte{}
 		for _, nh := range route.MultiPath {
@@ -585,6 +634,13 @@ func (h *Handle) routeHandle(route *Route, req *nl.NetlinkRequest, msg *nl.RtMsg
 				} else {
 					children = append(children, nl.NewRtAttr(unix.RTA_GATEWAY, []byte(nh.Gw.To16())))
 				}
+			}
+			if nh.Via != nil {
+				via, err := nh.Via.Encode()
+				if err != nil {
+					return err
+				}
+				children = append(children, nl.NewRtAttr(unix.RTA_VIA, via))
 			}
 			if nh.NewDst != nil {
 				if family != -1 && family != nh.NewDst.Family() {
@@ -793,6 +849,12 @@ func deserializeRoute(m []byte) (Route, error) {
 		switch attr.Attr.Type {
 		case unix.RTA_GATEWAY:
 			route.Gw = net.IP(attr.Value)
+		case unix.RTA_VIA:
+			via := RtVia{}
+			if err := via.Decode(attr.Value); err != nil {
+				return Route{}, err
+			}
+			route.Via = &via
 		case unix.RTA_PREFSRC:
 			route.Src = net.IP(attr.Value)
 		case unix.RTA_DST:
